@@ -1,0 +1,11 @@
+# KTBR - Face Blur Telegram Bot
+
+# Telegram Bot
+python-telegram-bot>=20.0
+
+# Computer Vision
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Environment
+python-dotenv>=1.0.0

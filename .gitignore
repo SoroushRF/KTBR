@@ -1,0 +1,28 @@
+# Video files (too large for GitHub)
+*.mp4
+
+# Model files
+face_detection_yunet*.onnx
+*.MP4
+*.avi
+*.mov
+*.mkv
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+
+# Sensitive data
+authorized_ids.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
