@@ -18,7 +18,7 @@ import gc
 from datetime import datetime
 from typing import Optional
 
-from telegram import Update, Bot
+from telegram import Update, Bot, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -26,6 +26,12 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
+
+# =============================================================================
+# ACTIVE PROCESSING TASKS (for cancellation)
+# =============================================================================
+# Stores user_id -> {"task": asyncio.Task, "temp_dir": path, "cancelled": bool}
+active_tasks: dict = {}
 
 # =============================================================================
 # CONFIGURATION (loaded from environment variables)
@@ -529,9 +535,97 @@ I can blur faces in your videos and images.
 • Max resolution: Full HD ({MAX_IMAGE_DIMENSION}px)  
 • Max size: {MAX_IMAGE_SIZE_MB} MB
 
+📋 **Commands:**
+/start - Show this welcome message
+/upload - How to upload files
+/stop - Cancel current processing
+
 Simply upload a video or image and I'll process it for you!
 """
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
+
+
+async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /upload command - explains how to upload."""
+    user = update.effective_user
+    is_allowed, message = is_user_allowed(user.username, user.id)
+    
+    if not is_allowed:
+        await update.message.reply_text(message)
+        return
+    
+    upload_message = f"""
+📤 **How to Upload Files**
+
+**Option 1: Direct Send**
+Just drag & drop or attach a video/image directly in this chat!
+
+**Option 2: Forward**
+Forward a video or image from another chat.
+
+**Option 3: File Upload**
+Click 📎 and select your file.
+
+━━━━━━━━━━━━━━━━━━━━━
+
+📹 **Video Limits:**
+• Max duration: {MAX_VIDEO_DURATION_SECONDS} seconds
+• Max size: {MAX_VIDEO_SIZE_MB} MB
+• Formats: MP4, AVI, MOV, etc.
+
+🖼️ **Image Limits:**
+• Max resolution: {MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION}
+• Max size: {MAX_IMAGE_SIZE_MB} MB
+• Formats: JPG, PNG, etc.
+
+━━━━━━━━━━━━━━━━━━━━━
+
+⏳ Processing time depends on file size.
+Use /stop to cancel if needed.
+"""
+    await update.message.reply_text(upload_message, parse_mode='Markdown')
+
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stop command - cancels current processing."""
+    user = update.effective_user
+    user_id = user.id
+    
+    is_allowed, message = is_user_allowed(user.username, user_id)
+    if not is_allowed:
+        await update.message.reply_text(message)
+        return
+    
+    # Check if user has an active task
+    if user_id not in active_tasks:
+        await update.message.reply_text(
+            "ℹ️ No active processing to stop.\n\n"
+            "Send a video or image to start processing."
+        )
+        return
+    
+    task_info = active_tasks[user_id]
+    task_info["cancelled"] = True
+    
+    # Clean up temp directory if it exists
+    temp_dir = task_info.get("temp_dir")
+    if temp_dir and os.path.exists(temp_dir):
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info(f"Cleaned up temp dir for user {user_id}: {temp_dir}")
+        except Exception as e:
+            logger.error(f"Error cleaning temp dir: {e}")
+    
+    # Remove from active tasks
+    del active_tasks[user_id]
+    
+    await update.message.reply_text(
+        "🛑 **Processing stopped!**\n\n"
+        "All temporary files have been deleted.\n\n"
+        "📤 Send another file when you're ready.",
+        parse_mode='Markdown'
+    )
+    logger.info(f"User {user_id} cancelled processing")
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle video uploads."""
@@ -542,6 +636,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_allowed, message = is_user_allowed(username, user_id)
     if not is_allowed:
         await update.message.reply_text(message)
+        return
+    
+    # Check if user already has an active task
+    if user_id in active_tasks:
+        await update.message.reply_text(
+            "⚠️ You already have a file being processed.\n\n"
+            "Use /stop to cancel it, or wait for it to finish."
+        )
         return
     
     video = update.message.video or update.message.document
@@ -579,6 +681,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ **Processing your video...**\n\n"
         f"📊 File size: {file_size_mb:.1f} MB\n"
         f"⏱️ Estimated time: ~{estimated_time} seconds\n\n"
+        f"Use /stop to cancel.\n"
         f"Please wait...",
         parse_mode='Markdown'
     )
@@ -587,6 +690,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     temp_dir = None
     try:
         temp_dir = tempfile.mkdtemp()
+        
+        # Register active task
+        active_tasks[user_id] = {
+            "temp_dir": temp_dir,
+            "cancelled": False,
+            "type": "video"
+        }
+        
         # Get file extension
         file_name = video.file_name if hasattr(video, 'file_name') and video.file_name else "video.mp4"
         ext = os.path.splitext(file_name)[1] or ".mp4"
@@ -598,8 +709,16 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(video.file_id)
         await file.download_to_drive(input_path)
         
+        # Check if cancelled during download
+        if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
+            return
+        
         # Process video
         success = blur_faces_in_video(input_path, output_path)
+        
+        # Check if cancelled during processing
+        if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
+            return
         
         if success and os.path.exists(output_path):
             # Read file into memory to avoid file locking issues
@@ -626,12 +745,17 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ An error occurred: {str(e)}")
     
     finally:
+        # Remove from active tasks
+        if user_id in active_tasks:
+            del active_tasks[user_id]
+        
         # Clean up temp directory
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except:
                 pass
+
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo uploads."""
@@ -804,6 +928,16 @@ async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # =============================================================================
 
+async def post_init(application: Application):
+    """Set up bot commands after initialization."""
+    commands = [
+        BotCommand("start", "Show welcome message and info"),
+        BotCommand("upload", "How to upload files"),
+        BotCommand("stop", "Cancel current processing"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands registered with Telegram")
+
 def main():
     """Start the bot."""
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
@@ -823,11 +957,15 @@ def main():
     print(f"Allowed usernames: {ALLOWED_USERNAMES}")
     print("=" * 60)
     
-    # Build application
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Build application with post_init callback
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
-    # Add handlers
+    # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("upload", upload_command))
+    application.add_handler(CommandHandler("stop", stop_command))
+    
+    # Add message handlers
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
@@ -839,3 +977,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
