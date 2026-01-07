@@ -16,6 +16,7 @@ from handlers import (
     start_command,
     upload_command,
     stop_command,
+    clear_command,
     handle_video,
     handle_photo,
     handle_document,
@@ -29,6 +30,7 @@ async def post_init(application: Application):
         BotCommand("start", "Show welcome message and info"),
         BotCommand("upload", "How to upload files"),
         BotCommand("stop", "Cancel current processing"),
+        BotCommand("clear", "How to delete your chat"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands registered with Telegram")
@@ -66,6 +68,7 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("upload", upload_command))
     application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("clear", clear_command))
     
     # Add message handlers
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))

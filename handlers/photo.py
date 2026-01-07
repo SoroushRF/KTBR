@@ -1,6 +1,6 @@
 """
 KTBR - Photo Handler
-Handles photo uploads and processing.
+Handles photo uploads and processing with auto-delete.
 """
 
 import os
@@ -15,10 +15,41 @@ from config import (
     MAX_IMAGE_SIZE_MB,
     MAX_IMAGE_DIMENSION,
     ESTIMATE_IMAGE_SEC_PER_MB,
+    AUTO_DELETE_SECONDS,
     logger
 )
 from utils.auth import is_user_allowed
 from processors.face_blur import blur_faces_in_image
+
+
+async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
+    """Delete messages after a delay."""
+    try:
+        await asyncio.sleep(delay)
+        
+        for msg_id in message_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception as e:
+                logger.warning(f"Could not delete message {msg_id}: {e}")
+        
+        reminder = await context.bot.send_message(
+            chat_id=chat_id,
+            text="🗑️ **Bot messages deleted.**\n\n"
+                 "⚠️ **Please delete your original file manually:**\n"
+                 "Long-press your message → Delete\n\n"
+                 "Use /clear for instructions.",
+            parse_mode='Markdown'
+        )
+        
+        await asyncio.sleep(30)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=reminder.message_id)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error in delete_messages_after_delay: {e}")
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -26,20 +57,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     username = user.username
     user_id = user.id
+    chat_id = update.effective_chat.id
+    
+    messages_to_delete = []
     
     is_allowed, message = is_user_allowed(username, user_id)
     if not is_allowed:
         await update.message.reply_text(message)
         return
     
-    # Get the largest photo
     photo = update.message.photo[-1] if update.message.photo else None
     
     if not photo:
         await update.message.reply_text("❌ No photo detected. Please send a valid image.")
         return
     
-    # Check dimensions
     if photo.width > MAX_IMAGE_DIMENSION or photo.height > MAX_IMAGE_DIMENSION:
         await update.message.reply_text(
             f"❌ Image resolution too high!\n\n"
@@ -48,7 +80,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Check file size
     file_size_mb = photo.file_size / (1024 * 1024)
     
     if file_size_mb > MAX_IMAGE_SIZE_MB:
@@ -59,56 +90,69 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Estimate processing time
     estimated_time = max(int(file_size_mb * ESTIMATE_IMAGE_SEC_PER_MB), 2)
     
-    await update.message.reply_text(
+    processing_msg = await update.message.reply_text(
         f"⏳ **Processing your image...**\n\n"
         f"📐 Resolution: {photo.width}x{photo.height}\n"
         f"⏱️ Estimated time: ~{estimated_time} seconds\n\n"
         f"Please wait...",
         parse_mode='Markdown'
     )
+    messages_to_delete.append(processing_msg.message_id)
     
-    # Download and process
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = os.path.join(temp_dir, "input.jpg")
             output_path = os.path.join(temp_dir, "output.jpg")
             
-            # Download file
             file = await context.bot.get_file(photo.file_id)
             await file.download_to_drive(input_path)
             
-            # Process image in background thread
             success = await asyncio.to_thread(blur_faces_in_image, input_path, output_path)
             
             if success and os.path.exists(output_path):
                 with open(output_path, 'rb') as f:
                     image_data = f.read()
                 
-                await update.message.reply_document(
+                result_msg = await update.message.reply_document(
                     document=BytesIO(image_data),
                     filename="blurred_image.jpg",
-                    caption="✅ **Done!** Here's your processed image with blurred faces."
+                    caption=f"✅ **Done!** Blurred image ready.\n\n"
+                            f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
                 )
-                await update.message.reply_text(
-                    "📤 Send another **video** or **image** to blur faces.",
+                messages_to_delete.append(result_msg.message_id)
+                
+                warning_msg = await update.message.reply_text(
+                    f"�️ **Auto-delete in {AUTO_DELETE_SECONDS} seconds!**\n\n"
+                    f"📥 Save the image above NOW!\n"
+                    f"🔒 All bot messages will be deleted.\n\n"
+                    f"⚠️ Please also delete your original file manually.",
                     parse_mode='Markdown'
                 )
+                messages_to_delete.append(warning_msg.message_id)
+                
+                asyncio.create_task(
+                    delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
+                )
             else:
-                await update.message.reply_text("❌ Failed to process image. Please try again.\n\n📤 Send another file to try again.")
+                error_msg = await update.message.reply_text(
+                    "❌ Failed to process image. Please try again.\n\n📤 Send another file to try again."
+                )
+                messages_to_delete.append(error_msg.message_id)
     
     except Exception as e:
         logger.error(f"Error processing photo: {e}")
-        await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+        error_msg = await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+        messages_to_delete.append(error_msg.message_id)
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle document uploads (for images/videos sent as files)."""
-    from handlers.video import handle_video  # Import here to avoid circular import
+    from handlers.video import handle_video
     
     document = update.message.document
+    chat_id = update.effective_chat.id
     
     if not document or not document.mime_type:
         await update.message.reply_text("❌ Unsupported file type.")
@@ -119,13 +163,13 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mime_type.startswith('video/'):
         await handle_video(update, context)
     elif mime_type.startswith('image/'):
-        # For images sent as documents
         user = update.effective_user
         is_allowed, message = is_user_allowed(user.username, user.id)
         if not is_allowed:
             await update.message.reply_text(message)
             return
         
+        messages_to_delete = []
         file_size_mb = document.file_size / (1024 * 1024)
         
         if file_size_mb > MAX_IMAGE_SIZE_MB:
@@ -138,13 +182,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         estimated_time = max(int(file_size_mb * ESTIMATE_IMAGE_SEC_PER_MB), 2)
         
-        await update.message.reply_text(
+        processing_msg = await update.message.reply_text(
             f"⏳ **Processing your image...**\n\n"
             f"📊 File size: {file_size_mb:.1f} MB\n"
             f"⏱️ Estimated time: ~{estimated_time} seconds\n\n"
             f"Please wait...",
             parse_mode='Markdown'
         )
+        messages_to_delete.append(processing_msg.message_id)
         
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -158,10 +203,28 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 success = await asyncio.to_thread(blur_faces_in_image, input_path, output_path)
                 
                 if success and os.path.exists(output_path):
-                    await update.message.reply_document(
-                        document=open(output_path, 'rb'),
+                    with open(output_path, 'rb') as f:
+                        image_data = f.read()
+                    
+                    result_msg = await update.message.reply_document(
+                        document=BytesIO(image_data),
                         filename=f"blurred_{document.file_name or 'image.jpg'}",
-                        caption="✅ **Done!** Here's your processed image with blurred faces."
+                        caption=f"✅ **Done!** Blurred image ready.\n\n"
+                                f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
+                    )
+                    messages_to_delete.append(result_msg.message_id)
+                    
+                    warning_msg = await update.message.reply_text(
+                        f"🗑️ **Auto-delete in {AUTO_DELETE_SECONDS} seconds!**\n\n"
+                        f"📥 Save the image above NOW!\n"
+                        f"🔒 All bot messages will be deleted.\n\n"
+                        f"⚠️ Please also delete your original file manually.",
+                        parse_mode='Markdown'
+                    )
+                    messages_to_delete.append(warning_msg.message_id)
+                    
+                    asyncio.create_task(
+                        delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
                     )
                 else:
                     await update.message.reply_text("❌ Failed to process image. Please try again.")

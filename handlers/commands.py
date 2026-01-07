@@ -1,6 +1,6 @@
 """
 KTBR - Command Handlers
-/start, /upload, /stop commands
+/start, /upload, /stop, /clear commands
 """
 
 from telegram import Update
@@ -11,6 +11,7 @@ from config import (
     MAX_VIDEO_SIZE_MB, 
     MAX_IMAGE_SIZE_MB, 
     MAX_IMAGE_DIMENSION,
+    AUTO_DELETE_SECONDS,
     active_tasks,
     logger
 )
@@ -46,10 +47,15 @@ I can blur faces in your videos and images.
 • Max resolution: Full HD ({MAX_IMAGE_DIMENSION}px)  
 • Max size: {MAX_IMAGE_SIZE_MB} MB
 
+🗑️ **Privacy:**
+• Results auto-delete in {AUTO_DELETE_SECONDS} seconds
+• Save files immediately after receiving!
+
 📋 **Commands:**
 /start - Show this welcome message
 /upload - How to upload files
 /stop - Cancel current processing
+/clear - How to delete your chat
 
 Simply upload a video or image and I'll process it for you!
 """
@@ -126,3 +132,47 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     logger.info(f"User {user_id} requested cancellation")
+
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /clear command - explains how to delete chat."""
+    user = update.effective_user
+    is_allowed, message = is_user_allowed(user.username, user.id)
+    
+    if not is_allowed:
+        await update.message.reply_text(message)
+        return
+    
+    clear_message = """
+🗑️ **How to Clear Your Chat**
+
+**Bot messages** are auto-deleted after processing.
+
+**Your messages** must be deleted manually:
+
+━━━━━━━━━━━━━━━━━━━━━
+
+📱 **On Mobile (iOS/Android):**
+1. Long-press on your message
+2. Tap "Delete"
+3. Select "Delete for me and bot" (if available)
+4. Or select "Delete for me"
+
+💻 **On Desktop:**
+1. Right-click on your message
+2. Click "Delete"
+3. Check "Also delete for the bot" (if available)
+4. Click "Delete"
+
+━━━━━━━━━━━━━━━━━━━━━
+
+🔒 **For maximum privacy:**
+• Delete the entire chat:
+  - Click chat name at top
+  - Scroll down → "Delete Chat"
+
+⚠️ **Important:** 
+The bot cannot delete YOUR messages due to Telegram's privacy policy.
+Only YOU can delete what you sent.
+"""
+    await update.message.reply_text(clear_message, parse_mode='Markdown')

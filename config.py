@@ -51,6 +51,13 @@ ESTIMATE_VIDEO_SEC_PER_MB = 2.5
 ESTIMATE_IMAGE_SEC_PER_MB = 0.5
 
 # =============================================================================
+# AUTO-DELETE SETTINGS
+# =============================================================================
+
+# Time in seconds before bot messages are auto-deleted
+AUTO_DELETE_SECONDS = int(os.getenv("AUTO_DELETE_SECONDS", "30"))
+
+# =============================================================================
 # FACE DETECTION MODEL
 # =============================================================================
 

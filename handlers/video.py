@@ -1,6 +1,6 @@
 """
 KTBR - Video Handler
-Handles video uploads and processing.
+Handles video uploads and processing with auto-delete.
 """
 
 import os
@@ -17,6 +17,7 @@ from config import (
     MAX_VIDEO_DURATION_SECONDS,
     MAX_VIDEO_SIZE_MB,
     ESTIMATE_VIDEO_SEC_PER_MB,
+    AUTO_DELETE_SECONDS,
     active_tasks,
     logger
 )
@@ -24,11 +25,49 @@ from utils.auth import is_user_allowed
 from processors.face_blur import blur_faces_in_video
 
 
+async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
+    """Delete messages after a delay with countdown."""
+    try:
+        # Wait for the delay
+        await asyncio.sleep(delay)
+        
+        # Delete all tracked messages
+        for msg_id in message_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            except Exception as e:
+                logger.warning(f"Could not delete message {msg_id}: {e}")
+        
+        # Send final reminder
+        reminder = await context.bot.send_message(
+            chat_id=chat_id,
+            text="🗑️ **Bot messages deleted.**\n\n"
+                 "⚠️ **Please delete your original file manually:**\n"
+                 "Long-press your message → Delete\n\n"
+                 "Use /clear for instructions.",
+            parse_mode='Markdown'
+        )
+        
+        # Auto-delete the reminder too after 30 seconds
+        await asyncio.sleep(30)
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=reminder.message_id)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Error in delete_messages_after_delay: {e}")
+
+
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle video uploads."""
     user = update.effective_user
     username = user.username
     user_id = user.id
+    chat_id = update.effective_chat.id
+    
+    # Track message IDs for deletion
+    messages_to_delete = []
     
     is_allowed, message = is_user_allowed(username, user_id)
     if not is_allowed:
@@ -74,7 +113,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     estimated_time = int(file_size_mb * ESTIMATE_VIDEO_SEC_PER_MB)
     estimated_time = max(estimated_time, 5)
     
-    await update.message.reply_text(
+    processing_msg = await update.message.reply_text(
         f"⏳ **Processing your video...**\n\n"
         f"📊 File size: {file_size_mb:.1f} MB\n"
         f"⏱️ Estimated time: ~{estimated_time} seconds\n\n"
@@ -82,6 +121,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Please wait...",
         parse_mode='Markdown'
     )
+    messages_to_delete.append(processing_msg.message_id)
     
     # Download and process
     temp_dir = None
@@ -110,11 +150,12 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Check if cancelled during download
         if cancel_event.is_set():
-            await update.message.reply_text(
+            abort_msg = await update.message.reply_text(
                 "🛑 **Processing aborted!**\n\n"
                 "All files have been cleaned up.",
                 parse_mode='Markdown'
             )
+            messages_to_delete.append(abort_msg.message_id)
             return
         
         # Process video in background thread
@@ -124,33 +165,53 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # If cancelled during processing, send abort message
         if was_cancelled:
-            await update.message.reply_text(
+            abort_msg = await update.message.reply_text(
                 "🛑 **Processing aborted!**\n\n"
                 "All files have been cleaned up.\n\n"
                 "📤 Send another file when you're ready.",
                 parse_mode='Markdown'
             )
+            messages_to_delete.append(abort_msg.message_id)
             return
         
         if success and os.path.exists(output_path):
             with open(output_path, 'rb') as f:
                 video_data = f.read()
             
-            await update.message.reply_document(
+            # Send the blurred video
+            result_msg = await update.message.reply_document(
                 document=BytesIO(video_data),
                 filename=f"blurred_{os.path.splitext(file_name)[0]}.mp4",
-                caption="✅ **Done!** Here's your processed video with blurred faces."
+                caption=f"✅ **Done!** Blurred video ready.\n\n"
+                        f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
             )
-            await update.message.reply_text(
-                "📤 Send another **video** or **image** to blur faces.",
+            messages_to_delete.append(result_msg.message_id)
+            
+            # Send warning message
+            warning_msg = await update.message.reply_text(
+                f"🗑️ **Auto-delete in {AUTO_DELETE_SECONDS} seconds!**\n\n"
+                f"📥 Save the video above NOW!\n"
+                f"🔒 All bot messages will be deleted.\n\n"
+                f"⚠️ Please also delete your original file manually.",
                 parse_mode='Markdown'
             )
+            messages_to_delete.append(warning_msg.message_id)
+            
+            # Schedule deletion
+            asyncio.create_task(
+                delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
+            )
+            
         else:
-            await update.message.reply_text("❌ Failed to process video. Please try again.\n\n📤 Send another file to try again.")
+            error_msg = await update.message.reply_text(
+                "❌ Failed to process video. Please try again.\n\n📤 Send another file to try again."
+            )
+            messages_to_delete.append(error_msg.message_id)
     
     except Exception as e:
         logger.error(f"Error processing video: {e}")
-        await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+        error_msg = await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+        messages_to_delete.append(error_msg.message_id)
     
     finally:
         if user_id in active_tasks:
