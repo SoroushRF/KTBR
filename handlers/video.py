@@ -183,8 +183,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 document=BytesIO(video_data),
                 filename=f"blurred_{os.path.splitext(file_name)[0]}.mp4",
                 caption=f"✅ **Done!** Blurred video ready.\n\n"
-                        f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds...",
-                protect_content=True  # Prevent forwarding and screenshots
+                        f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
             )
             messages_to_delete.append(result_msg.message_id)
             
