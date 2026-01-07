@@ -15,6 +15,7 @@ import tempfile
 import logging
 import time
 import gc
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -30,7 +31,7 @@ from telegram.ext import (
 # =============================================================================
 # ACTIVE PROCESSING TASKS (for cancellation)
 # =============================================================================
-# Stores user_id -> {"task": asyncio.Task, "temp_dir": path, "cancelled": bool}
+# Stores user_id -> {"temp_dir": path, "cancel_event": threading.Event}
 active_tasks: dict = {}
 
 # =============================================================================
@@ -634,9 +635,11 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Set cancelled flag - the processing loop will detect this and stop
-    # DO NOT delete from active_tasks here - the handler needs to check the flag!
-    active_tasks[user_id]["cancelled"] = True
+    # Signal cancellation using threading.Event (thread-safe!)
+    cancel_event = active_tasks[user_id].get("cancel_event")
+    if cancel_event:
+        cancel_event.set()  # This is immediately visible to the processing thread
+        logger.info(f"User {user_id} - cancel event SET")
     
     await update.message.reply_text(
         "🛑 **Stopping processing...**\n\n"
@@ -707,13 +710,15 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Download and process
     temp_dir = None
+    cancel_event = threading.Event()  # Thread-safe cancellation signal
+    
     try:
         temp_dir = tempfile.mkdtemp()
         
-        # Register active task
+        # Register active task with the cancel event
         active_tasks[user_id] = {
             "temp_dir": temp_dir,
-            "cancelled": False,
+            "cancel_event": cancel_event,
             "type": "video"
         }
         
@@ -729,7 +734,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive(input_path)
         
         # Check if cancelled during download
-        if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
+        if cancel_event.is_set():
             await update.message.reply_text(
                 "🛑 **Processing aborted!**\n\n"
                 "All files have been cleaned up.",
@@ -737,13 +742,10 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        # Create cancel check function
-        def check_cancelled():
-            return user_id in active_tasks and active_tasks[user_id].get("cancelled", False)
-        
         # Process video in background thread (allows /stop to be received)
+        # Pass the event's is_set method as the cancel check
         success, was_cancelled = await asyncio.to_thread(
-            blur_faces_in_video, input_path, output_path, 2, check_cancelled
+            blur_faces_in_video, input_path, output_path, 2, cancel_event.is_set
         )
         
         # If cancelled during processing, send abort message
