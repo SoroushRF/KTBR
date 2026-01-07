@@ -22,6 +22,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY bot.py .
+COPY config.py .
+COPY handlers/ ./handlers/
+COPY processors/ ./processors/
+COPY utils/ ./utils/
 COPY face_detection_yunet_2023mar.onnx .
 
 # Create a directory for persistent data
