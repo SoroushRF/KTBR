@@ -621,7 +621,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = user.id
     
-    is_allowed, message = is_user_allowed(user.username, user_id)
+    is_allowed, message = is_user_allowed(user.username, user.id)
     if not is_allowed:
         await update.message.reply_text(message)
         return
@@ -634,28 +634,17 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    task_info = active_tasks[user_id]
-    task_info["cancelled"] = True
-    
-    # Clean up temp directory if it exists
-    temp_dir = task_info.get("temp_dir")
-    if temp_dir and os.path.exists(temp_dir):
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            logger.info(f"Cleaned up temp dir for user {user_id}: {temp_dir}")
-        except Exception as e:
-            logger.error(f"Error cleaning temp dir: {e}")
-    
-    # Remove from active tasks
-    del active_tasks[user_id]
+    # Set cancelled flag - the processing loop will detect this and stop
+    # DO NOT delete from active_tasks here - the handler needs to check the flag!
+    active_tasks[user_id]["cancelled"] = True
     
     await update.message.reply_text(
-        "🛑 **Processing stopped!**\n\n"
-        "All temporary files have been deleted.\n\n"
-        "📤 Send another file when you're ready.",
+        "🛑 **Stopping processing...**\n\n"
+        "The current operation is being aborted.\n"
+        "Please wait for confirmation.",
         parse_mode='Markdown'
     )
-    logger.info(f"User {user_id} cancelled processing")
+    logger.info(f"User {user_id} requested cancellation")
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle video uploads."""
