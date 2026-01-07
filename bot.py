@@ -366,13 +366,24 @@ def blur_faces_in_image(input_path: str, output_path: str) -> bool:
         logger.error(f"Error blurring image: {e}")
         return False
 
-def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: int = 2) -> bool:
-    """Blur faces in a video with tracking."""
+def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: int = 2, cancel_check=None) -> tuple[bool, bool]:
+    """
+    Blur faces in a video with tracking.
+    
+    Args:
+        input_path: Path to input video
+        output_path: Path to output video
+        edge_crop_percent: Percentage to crop from edges
+        cancel_check: Optional callable that returns True if processing should be cancelled
+    
+    Returns:
+        (success, was_cancelled) tuple
+    """
     yunet_model = "face_detection_yunet_2023mar.onnx"
     yunet_url = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
     
     if not download_model(yunet_model, yunet_url):
-        return False
+        return False, False
     
     try:
         detector = cv2.FaceDetectorYN.create(
@@ -385,11 +396,11 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
         )
     except Exception as e:
         logger.error(f"Failed to load YuNet: {e}")
-        return False
+        return False, False
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
-        return False
+        return False, False
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -403,7 +414,7 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
     
     if cropped_width <= 0 or cropped_height <= 0:
         cap.release()
-        return False
+        return False, False
     
     # Temporary output without audio
     temp_output = output_path + ".temp.mp4"
@@ -414,10 +425,21 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
     face_tracker = FaceTracker()
     FaceTrack._next_id = 0
     
+    was_cancelled = False
+    frame_count = 0
+    
     while True:
+        # Check for cancellation every frame
+        if cancel_check and cancel_check():
+            logger.info("Video processing cancelled by user")
+            was_cancelled = True
+            break
+        
         success, frame = cap.read()
         if not success:
             break
+        
+        frame_count += 1
         
         detector.setInputSize((width, height))
         results = detector.detect(frame)
@@ -444,6 +466,14 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
     del cap
     gc.collect()
     time.sleep(0.5)  # Give Windows time to release file handles
+    
+    # If cancelled, clean up and return
+    if was_cancelled:
+        try:
+            os.remove(temp_output)
+        except:
+            pass
+        return False, True
     
     # Merge audio using ffmpeg
     ffmpeg_available = shutil.which('ffmpeg') is not None
@@ -478,7 +508,7 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
                     os.remove(temp_output)
                 except:
                     pass
-                return True
+                return True, False
             else:
                 logger.warning(f"FFmpeg failed: {result.stderr}")
                 # Fallback: use video without audio
@@ -486,7 +516,7 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
                     shutil.move(temp_output, output_path)
                 except:
                     pass
-                return True
+                return True, False
         except Exception as e:
             logger.error(f"FFmpeg error: {e}")
             if os.path.exists(temp_output):
@@ -494,13 +524,13 @@ def blur_faces_in_video(input_path: str, output_path: str, edge_crop_percent: in
                     shutil.move(temp_output, output_path)
                 except:
                     pass
-            return True
+            return True, False
     else:
         try:
             shutil.move(temp_output, output_path)
         except:
             pass
-        return True
+        return True, False
 
 # =============================================================================
 # TELEGRAM BOT HANDLERS
@@ -711,13 +741,30 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Check if cancelled during download
         if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
+            await update.message.reply_text(
+                "🛑 **Processing aborted!**\n\n"
+                "All files have been cleaned up.",
+                parse_mode='Markdown'
+            )
             return
         
-        # Process video in background thread (allows /stop to be received)
-        success = await asyncio.to_thread(blur_faces_in_video, input_path, output_path)
+        # Create cancel check function
+        def check_cancelled():
+            return user_id in active_tasks and active_tasks[user_id].get("cancelled", False)
         
-        # Check if cancelled during processing
-        if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
+        # Process video in background thread (allows /stop to be received)
+        success, was_cancelled = await asyncio.to_thread(
+            blur_faces_in_video, input_path, output_path, 2, check_cancelled
+        )
+        
+        # If cancelled during processing, send abort message
+        if was_cancelled:
+            await update.message.reply_text(
+                "🛑 **Processing aborted!**\n\n"
+                "All files have been cleaned up.\n\n"
+                "📤 Send another file when you're ready.",
+                parse_mode='Markdown'
+            )
             return
         
         if success and os.path.exists(output_path):
