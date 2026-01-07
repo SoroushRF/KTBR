@@ -119,7 +119,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     document=BytesIO(image_data),
                     filename="blurred_image.jpg",
                     caption=f"✅ **Done!** Blurred image ready.\n\n"
-                            f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
+                            f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds...",
+                    protect_content=True  # Prevent forwarding and screenshots
                 )
                 messages_to_delete.append(result_msg.message_id)
                 
@@ -210,7 +211,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         document=BytesIO(image_data),
                         filename=f"blurred_{document.file_name or 'image.jpg'}",
                         caption=f"✅ **Done!** Blurred image ready.\n\n"
-                                f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
+                                f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds...",
+                        protect_content=True  # Prevent forwarding and screenshots
                     )
                     messages_to_delete.append(result_msg.message_id)
                     
