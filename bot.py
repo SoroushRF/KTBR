@@ -713,8 +713,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
             return
         
-        # Process video
-        success = blur_faces_in_video(input_path, output_path)
+        # Process video in background thread (allows /stop to be received)
+        success = await asyncio.to_thread(blur_faces_in_video, input_path, output_path)
         
         # Check if cancelled during processing
         if user_id in active_tasks and active_tasks[user_id].get("cancelled"):
@@ -816,8 +816,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             file = await context.bot.get_file(photo.file_id)
             await file.download_to_drive(input_path)
             
-            # Process image
-            success = blur_faces_in_image(input_path, output_path)
+            # Process image in background thread
+            success = await asyncio.to_thread(blur_faces_in_image, input_path, output_path)
             
             if success and os.path.exists(output_path):
                 with open(output_path, 'rb') as f:
@@ -890,7 +890,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file = await context.bot.get_file(document.file_id)
                 await file.download_to_drive(input_path)
                 
-                success = blur_faces_in_image(input_path, output_path)
+                success = await asyncio.to_thread(blur_faces_in_image, input_path, output_path)
                 
                 if success and os.path.exists(output_path):
                     await update.message.reply_document(
