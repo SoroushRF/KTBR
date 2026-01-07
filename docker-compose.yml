@@ -1,0 +1,16 @@
+# KTBR - Face Blur Telegram Bot
+# Docker Compose Configuration
+
+services:
+  ktbr-bot:
+    build: .
+    container_name: ktbr-face-blur-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ALLOWED_USERNAMES=${ALLOWED_USERNAMES}
+    volumes:
+      # Persist authorized user IDs across container restarts
+      - ./data:/app/data
+      # Alternatively, mount the JSON file directly:
+      # - ./authorized_ids.json:/app/authorized_ids.json

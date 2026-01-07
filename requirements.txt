@@ -3,8 +3,8 @@
 # Telegram Bot
 python-telegram-bot>=20.0
 
-# Computer Vision
-opencv-python>=4.8.0
+# Computer Vision (headless for server/container use)
+opencv-python-headless>=4.8.0
 numpy>=1.24.0
 
 # Environment

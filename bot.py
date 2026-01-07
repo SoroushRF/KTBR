@@ -52,7 +52,9 @@ MAX_IMAGE_SIZE_MB = 10
 MAX_IMAGE_DIMENSION = 1920  # FHD
 
 # Data file to store authorized user IDs
-AUTHORIZED_IDS_FILE = "authorized_ids.json"
+# Use DATA_DIR env var for Docker volume mounting, defaults to current directory
+DATA_DIR = os.getenv("DATA_DIR", ".")
+AUTHORIZED_IDS_FILE = os.path.join(DATA_DIR, "authorized_ids.json")
 
 # Processing time estimates (seconds per MB)
 ESTIMATE_VIDEO_SEC_PER_MB = 2.5  # Approximate processing time
