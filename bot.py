@@ -995,8 +995,15 @@ def main():
     print(f"Allowed usernames: {ALLOWED_USERNAMES}")
     print("=" * 60)
     
-    # Build application with post_init callback
-    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    # Build application with concurrent updates enabled
+    # This allows /stop to be processed while video processing is running
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .concurrent_updates(True)  # CRITICAL: Allows handlers to run in parallel
+        .post_init(post_init)
+        .build()
+    )
     
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
