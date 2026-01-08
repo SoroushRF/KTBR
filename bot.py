@@ -25,6 +25,7 @@ from handlers import (
     handle_photo,
     handle_document,
     handle_unknown,
+    get_report_handler,
 )
 
 
@@ -35,6 +36,7 @@ async def post_init(application: Application):
         BotCommand("mode", "Switch Face Blur / Voice modes"),
         BotCommand("upload", "How to upload files"),
         BotCommand("stop", "Cancel current processing"),
+        BotCommand("report", "Report a bug"),
         BotCommand("clear", "How to delete your chat"),
     ]
     await application.bot.set_my_commands(commands)
@@ -81,6 +83,10 @@ def main():
     
     # Add callback handler for voice level selection
     application.add_handler(CallbackQueryHandler(voice_level_callback, pattern="^voice_"))
+
+    
+    # Add conversation handlers (MUST be before standard message handlers)
+    application.add_handler(get_report_handler())
     
     # Add message handlers
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))

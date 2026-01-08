@@ -26,3 +26,4 @@ authorized_ids.json
 .vscode/
 *.swp
 *.swo
+reports/
