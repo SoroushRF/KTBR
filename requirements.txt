@@ -1,4 +1,4 @@
-# KTBR - Face Blur Telegram Bot
+# KTBR - Privacy Protection Telegram Bot
 
 # Telegram Bot
 python-telegram-bot>=20.0
@@ -6,6 +6,11 @@ python-telegram-bot>=20.0
 # Computer Vision (headless for server/container use)
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
+
+# Audio Processing (voice anonymization)
+librosa>=0.10.0
+soundfile>=0.12.0
+pyrubberband>=0.3.0
 
 # Environment
 python-dotenv>=1.0.0
