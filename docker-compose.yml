@@ -13,5 +13,6 @@ services:
       # Persist authorized user IDs across container restarts
       - ./data:/app/data
       - ./reports:/app/reports
+      - ./whitelist.txt:/app/whitelist.txt
       # Alternatively, mount the JSON file directly:
       # - ./authorized_ids.json:/app/authorized_ids.json

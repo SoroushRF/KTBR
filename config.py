@@ -26,6 +26,19 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 _usernames_str = os.getenv("ALLOWED_USERNAMES", "")
 ALLOWED_USERNAMES = [u.strip() for u in _usernames_str.split(",") if u.strip()]
 
+# Load additional usernames from whitelist.txt
+WHITELIST_FILE = os.getenv("WHITELIST_FILE", "whitelist.txt")
+if os.path.exists(WHITELIST_FILE):
+    try:
+        with open(WHITELIST_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    ALLOWED_USERNAMES.append(line)
+        logger.info(f"Loaded {len(ALLOWED_USERNAMES)} allowed usernames")
+    except Exception as e:
+        logger.error(f"Error reading whitelist file: {e}")
+
 # =============================================================================
 # FILE LIMITS
 # =============================================================================
