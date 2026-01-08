@@ -36,7 +36,7 @@ def get_user_mode(user_id: int) -> dict:
 
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
-    """Delete messages after a delay with countdown."""
+    """Delete messages after a delay."""
     try:
         await asyncio.sleep(delay)
         
@@ -45,21 +45,6 @@ async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_i
                 await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
             except Exception as e:
                 logger.warning(f"Could not delete message {msg_id}: {e}")
-        
-        reminder = await context.bot.send_message(
-            chat_id=chat_id,
-            text="🗑️ **Bot messages deleted.**\n\n"
-                 "⚠️ **Please delete your original file manually:**\n"
-                 "Long-press your message → Delete\n\n"
-                 "Use /clear for instructions.",
-            parse_mode='Markdown'
-        )
-        
-        await asyncio.sleep(30)
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=reminder.message_id)
-        except:
-            pass
             
     except Exception as e:
         logger.error(f"Error in delete_messages_after_delay: {e}")
