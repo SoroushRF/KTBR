@@ -22,6 +22,13 @@ except ImportError:
 # Bot token from @BotFather
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
+# Owner ID for admin notifications
+raw_owner_id = os.getenv("OWNER_ID", "0")
+try:
+    OWNER_ID = int(raw_owner_id)
+except ValueError:
+    OWNER_ID = 0
+
 # Allowed usernames (comma-separated)
 _usernames_str = os.getenv("ALLOWED_USERNAMES", "")
 ALLOWED_USERNAMES = [u.strip() for u in _usernames_str.split(",") if u.strip()]
@@ -55,6 +62,7 @@ MAX_IMAGE_DIMENSION = 1920  # FHD
 # Data file to store authorized user IDs
 DATA_DIR = os.getenv("DATA_DIR", ".")
 AUTHORIZED_IDS_FILE = os.path.join(DATA_DIR, "authorized_ids.json")
+PENDING_REQUESTS_FILE = os.path.join(DATA_DIR, "pending_requests.json")
 
 # =============================================================================
 # PROCESSING ESTIMATES

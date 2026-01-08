@@ -27,3 +27,4 @@ authorized_ids.json
 *.swp
 *.swo
 reports/
+pending_requests.json

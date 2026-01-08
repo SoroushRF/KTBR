@@ -26,6 +26,8 @@ from handlers import (
     handle_document,
     handle_unknown,
     get_report_handler,
+    get_access_handler,
+    access_callback,
 )
 
 
@@ -85,7 +87,13 @@ def main():
     application.add_handler(CallbackQueryHandler(voice_level_callback, pattern="^voice_"))
 
     
+    # Add callback handler for admin access approvals
+    application.add_handler(CallbackQueryHandler(access_callback, pattern="^access_"))
+    
     # Add conversation handlers (MUST be before standard message handlers)
+    # ACCESS HANDLER FIRST: Intercepts all unauthorized messages
+    application.add_handler(get_access_handler())
+    # Report handler
     application.add_handler(get_report_handler())
     
     # Add message handlers
