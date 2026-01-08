@@ -1,9 +1,9 @@
 """
 KTBR - Command Handlers
-/start, /upload, /stop, /clear commands
+/start, /upload, /stop, /clear, /mode commands
 """
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import (
@@ -13,6 +13,7 @@ from config import (
     MAX_IMAGE_DIMENSION,
     AUTO_DELETE_SECONDS,
     active_tasks,
+    user_modes,
     logger
 )
 from utils.auth import is_user_allowed
@@ -30,12 +31,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message)
         return
     
+    # Get current mode
+    current_mode = get_user_mode(user_id)
+    mode_emoji = "🎭" if current_mode == "face" else "🔊"
+    mode_name = "Face Blur" if current_mode == "face" else "Voice Anonymize"
+    
     welcome_message = f"""
 👋 Welcome, @{username}!
 
-🔒 **KTBR - Face Blur Bot**
+🔒 **KTBR - Privacy Protection Bot**
 
-I can blur faces in your videos and images.
+{mode_emoji} **Current Mode: {mode_name}**
+Use /mode to switch modes.
 
 📤 **Just send me a file:**
 
@@ -43,7 +50,7 @@ I can blur faces in your videos and images.
 • Max duration: {MAX_VIDEO_DURATION_SECONDS} seconds
 • Max size: {MAX_VIDEO_SIZE_MB} MB
 
-🖼️ **Image:**
+🖼️ **Image:** (Face Blur mode only)
 • Max resolution: Full HD ({MAX_IMAGE_DIMENSION}px)  
 • Max size: {MAX_IMAGE_SIZE_MB} MB
 
@@ -53,11 +60,12 @@ I can blur faces in your videos and images.
 
 📋 **Commands:**
 /start - Show this welcome message
+/mode - Switch Face Blur / Voice modes
 /upload - How to upload files
 /stop - Cancel current processing
 /clear - How to delete your chat
 
-Simply upload a video or image and I'll process it for you!
+Simply upload a file and I'll process it for you!
 """
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
@@ -176,3 +184,76 @@ The bot cannot delete YOUR messages due to Telegram's privacy policy.
 Only YOU can delete what you sent.
 """
     await update.message.reply_text(clear_message, parse_mode='Markdown')
+
+
+def get_user_mode(user_id: int) -> str:
+    """Get user's current mode, default is 'face'."""
+    if user_id not in user_modes:
+        user_modes[user_id] = {"mode": "face", "voice_level": "fast"}
+    return user_modes[user_id]["mode"]
+
+
+async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /mode command - switch between Face Blur and Voice Anonymize."""
+    user = update.effective_user
+    is_allowed, message = is_user_allowed(user.username, user.id)
+    
+    if not is_allowed:
+        await update.message.reply_text(message)
+        return
+    
+    current_mode = get_user_mode(user.id)
+    current_emoji = "🎭" if current_mode == "face" else "🔊"
+    current_name = "Face Blur" if current_mode == "face" else "Voice Anonymize"
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("🎭 Face Blur", callback_data="mode_face"),
+            InlineKeyboardButton("🔊 Voice Anonymize", callback_data="mode_voice"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"🔧 **Select Processing Mode**\n\n"
+        f"Current mode: {current_emoji} **{current_name}**\n\n"
+        f"🎭 **Face Blur** - Blur faces in videos/images\n"
+        f"🔊 **Voice Anonymize** - Alter voice in videos (no images)\n\n"
+        f"Tap a button below to switch:",
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
+
+
+async def mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle callback when user clicks mode selection buttons."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    callback_data = query.data
+    
+    # Initialize user mode if not exists
+    if user_id not in user_modes:
+        user_modes[user_id] = {"mode": "face", "voice_level": "fast"}
+    
+    if callback_data == "mode_face":
+        user_modes[user_id]["mode"] = "face"
+        await query.edit_message_text(
+            "✅ **Mode switched to: 🎭 Face Blur**\n\n"
+            "Send a video or image to blur faces.\n\n"
+            "Use /mode to switch modes anytime.",
+            parse_mode='Markdown'
+        )
+        logger.info(f"User {user_id} switched to Face Blur mode")
+        
+    elif callback_data == "mode_voice":
+        user_modes[user_id]["mode"] = "voice"
+        await query.edit_message_text(
+            "✅ **Mode switched to: 🔊 Voice Anonymize**\n\n"
+            "Send a **video** to anonymize the voice.\n"
+            "⚠️ Images are not supported in this mode.\n\n"
+            "Use /mode to switch modes anytime.",
+            parse_mode='Markdown'
+        )
+        logger.info(f"User {user_id} switched to Voice Anonymize mode")

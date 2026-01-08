@@ -1,5 +1,5 @@
 """
-KTBR - Face Blurring Telegram Bot
+KTBR - Privacy Protection Telegram Bot
 Main entry point - starts the bot.
 """
 
@@ -8,6 +8,7 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
 )
 
@@ -17,6 +18,8 @@ from handlers import (
     upload_command,
     stop_command,
     clear_command,
+    mode_command,
+    mode_callback,
     handle_video,
     handle_photo,
     handle_document,
@@ -28,6 +31,7 @@ async def post_init(application: Application):
     """Set up bot commands after initialization."""
     commands = [
         BotCommand("start", "Show welcome message and info"),
+        BotCommand("mode", "Switch Face Blur / Voice modes"),
         BotCommand("upload", "How to upload files"),
         BotCommand("stop", "Cancel current processing"),
         BotCommand("clear", "How to delete your chat"),
@@ -49,7 +53,7 @@ def main():
         return
     
     print("=" * 60)
-    print("KTBR - Face Blur Telegram Bot")
+    print("KTBR - Privacy Protection Telegram Bot")
     print("=" * 60)
     print(f"Allowed usernames: {ALLOWED_USERNAMES}")
     print("=" * 60)
@@ -66,9 +70,13 @@ def main():
     
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("mode", mode_command))
     application.add_handler(CommandHandler("upload", upload_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    
+    # Add callback handler for inline buttons (mode selection)
+    application.add_handler(CallbackQueryHandler(mode_callback, pattern="^mode_"))
     
     # Add message handlers
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))
@@ -83,3 +91,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

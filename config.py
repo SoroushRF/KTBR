@@ -80,3 +80,11 @@ logger = logging.getLogger("ktbr")
 
 # Stores user_id -> {"temp_dir": path, "cancel_event": threading.Event}
 active_tasks: dict = {}
+
+# =============================================================================
+# USER MODES (face blur vs voice anonymization)
+# =============================================================================
+
+# Stores user_id -> {"mode": "face" | "voice", "voice_level": "fast" | "secure"}
+# Default mode is "face" (face blur)
+user_modes: dict = {}
