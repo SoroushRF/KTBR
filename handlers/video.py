@@ -191,10 +191,13 @@ async def start_face_blur(context, chat_id, user_id, file_id, file_name, file_si
             set_cooldown(user_id)
             asyncio.create_task(delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS))
         else:
-            await context.bot.send_message(chat_id=chat_id, text="❌ Failed/Aborted")
+            if cancel_event.is_set():
+                await context.bot.send_message(chat_id=chat_id, text="🛑 **Processing Cancelled**", parse_mode='Markdown')
+            else:
+                await context.bot.send_message(chat_id=chat_id, text="❌ **Processing Failed**", parse_mode='Markdown')
     except Exception as e:
         logger.error(f"Error: {e}")
-        await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ **Error:** {e}", parse_mode='Markdown')
     finally:
         if user_id in active_tasks: del active_tasks[user_id]
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -266,7 +269,10 @@ async def start_voice_processing(context, chat_id, user_id, file_id, file_name, 
             set_cooldown(user_id)
             asyncio.create_task(delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS))
         else:
-            await context.bot.send_message(chat_id=chat_id, text="❌ Failed")
+            if cancel_event.is_set():
+                await context.bot.send_message(chat_id=chat_id, text="🛑 **Processing Cancelled**", parse_mode='Markdown')
+            else:
+                await context.bot.send_message(chat_id=chat_id, text="❌ **Processing Failed**", parse_mode='Markdown')
     except Exception as e:
         logger.error(f"Error: {e}")
     finally:
