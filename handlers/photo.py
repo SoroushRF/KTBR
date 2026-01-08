@@ -27,8 +27,10 @@ from utils.queue_manager import (
     get_cooldown_remaining,
     set_cooldown,
     add_to_queue,
+    remove_from_queue,
     estimate_wait_time,
     format_wait_time,
+    notify_next_in_queue,
 )
 from processors.face_blur import blur_faces_in_image
 
@@ -90,6 +92,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Check if user already has an active task
+    if user_id in active_tasks:
+        await update.message.reply_text(
+            "⚠️ You already have a file being processed.\n\n"
+            "Use /stop to cancel it, or wait for it to finish."
+        )
+        return
+    
     # Check if server is busy (2 concurrent jobs max)
     if is_server_busy():
         position = add_to_queue(user_id, chat_id, 1.0)  # Assume ~1MB for photos
@@ -103,6 +113,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
+    
+    # Remove from queue if they were waiting
+    remove_from_queue(user_id)
     
     photo = update.message.photo[-1] if update.message.photo else None
     
@@ -182,10 +195,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 messages_to_delete.append(error_msg.message_id)
     
-    except Exception as e:
-        logger.error(f"Error processing photo: {e}")
-        error_msg = await update.message.reply_text(f"❌ An error occurred: {str(e)}")
-        messages_to_delete.append(error_msg.message_id)
+    finally:
+        # Notify next user in queue if a slot opened up
+        asyncio.create_task(notify_next_in_queue(context))
 
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -275,6 +287,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error processing document: {e}")
             await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+        finally:
+            # Notify next user in queue if a slot opened up
+            asyncio.create_task(notify_next_in_queue(context))
     else:
         await update.message.reply_text(
             "❌ Unsupported file type.\n\n"

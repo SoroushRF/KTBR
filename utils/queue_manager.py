@@ -194,3 +194,35 @@ def get_server_status() -> dict:
         "is_busy": is_server_busy(),
         "cooldowns_active": len(user_cooldowns)
     }
+
+
+async def notify_next_in_queue(context) -> bool:
+    """
+    Check if a slot is open and notify the next user in the queue.
+    Called when a processing job finishes.
+    """
+    if is_server_busy():
+        return False
+        
+    next_user = get_next_in_queue()
+    if not next_user:
+        return False
+        
+    chat_id = next_user["chat_id"]
+    user_id = next_user["user_id"]
+    
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ **A slot is now open!**\n\n"
+                 f"It's your turn. You can now send your video or photo for processing.\n\n"
+                 f"⚠️ *Note: Others in queue can also see this, so send your file soon!*",
+            parse_mode='Markdown'
+        )
+        logger.info(f"Notified user {user_id} that slot is open")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to notify user {user_id}: {e}")
+        # If notification fails, maybe they blocked the bot - remove them to avoid blocking queue
+        remove_from_queue(user_id)
+        return False

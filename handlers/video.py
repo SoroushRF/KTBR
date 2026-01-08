@@ -34,6 +34,7 @@ from utils.queue_manager import (
     get_queue_position,
     estimate_wait_time,
     format_wait_time,
+    notify_next_in_queue,
 )
 from processors.face_blur import blur_faces_in_video
 from processors.voice_anon import anonymize_voice_fast, anonymize_voice_secure
@@ -114,6 +115,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
+    
+    # Remove from queue if they were waiting
+    remove_from_queue(user_id)
     
     video = update.message.video or update.message.document
     
@@ -256,6 +260,9 @@ async def process_face_blur(update, context, video, file_size_mb, messages_to_de
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except:
                 pass
+        
+        # Notify next user in queue if a slot opened up
+        asyncio.create_task(notify_next_in_queue(context))
 
 
 async def process_voice_anon(update, context, video, file_size_mb, messages_to_delete, chat_id, user_id):
@@ -425,6 +432,9 @@ async def voice_level_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except:
                 pass
+        
+        # Notify next user in queue if a slot opened up
+        asyncio.create_task(notify_next_in_queue(context))
         
         # Clean up pending video data
         if 'pending_voice_video' in context.user_data:
