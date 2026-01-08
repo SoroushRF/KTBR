@@ -28,6 +28,7 @@ from handlers import (
     get_report_handler,
     get_request_handler,
     admin_callback_handler,
+    status_command,
 )
 
 
@@ -80,6 +81,9 @@ def main():
     application.add_handler(CommandHandler("upload", upload_command))
     application.add_handler(CommandHandler("stop", stop_command))
     application.add_handler(CommandHandler("clear", clear_command))
+    
+    # Owner Commands
+    application.add_handler(CommandHandler("status", status_command))
     
     # Add callback handler for inline buttons (mode selection)
     application.add_handler(CallbackQueryHandler(mode_callback, pattern="^mode_"))
