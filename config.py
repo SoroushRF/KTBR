@@ -16,6 +16,16 @@ except ImportError:
     pass
 
 # =============================================================================
+# LOGGING
+# =============================================================================
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger("ktbr")
+
+# =============================================================================
 # BOT CONFIGURATION
 # =============================================================================
 
@@ -85,15 +95,7 @@ AUTO_DELETE_SECONDS = int(os.getenv("AUTO_DELETE_SECONDS", "30"))
 YUNET_MODEL = "face_detection_yunet_2023mar.onnx"
 YUNET_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 
-# =============================================================================
-# LOGGING
-# =============================================================================
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger("ktbr")
 
 # =============================================================================
 # ACTIVE TASKS (for cancellation)
