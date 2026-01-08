@@ -9,6 +9,8 @@ services:
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - ALLOWED_USERNAMES=${ALLOWED_USERNAMES}
+      - OWNER_ID=${OWNER_ID}
+      - AUTO_DELETE_SECONDS=${AUTO_DELETE_SECONDS}
     volumes:
       # Persist authorized user IDs across container restarts
       - ./data:/app/data
