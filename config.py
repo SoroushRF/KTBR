@@ -88,3 +88,19 @@ active_tasks: dict = {}
 # Stores user_id -> {"mode": "face" | "voice", "voice_level": "fast" | "secure"}
 # Default mode is "face" (face blur)
 user_modes: dict = {}
+
+# =============================================================================
+# QUEUE & RATE LIMITING
+# =============================================================================
+
+# Maximum number of concurrent processing jobs (across all users)
+MAX_CONCURRENT_JOBS = 2
+
+# Queue of users waiting for processing: list of {"user_id": int, "chat_id": int, "timestamp": float, "file_info": dict}
+processing_queue: list = []
+
+# Cooldown after receiving processed media (seconds)
+COOLDOWN_SECONDS = 30
+
+# Stores user_id -> timestamp when cooldown ends
+user_cooldowns: dict = {}

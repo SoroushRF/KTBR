@@ -24,6 +24,17 @@ from config import (
     logger
 )
 from utils.auth import is_user_allowed
+from utils.queue_manager import (
+    is_server_busy,
+    is_on_cooldown,
+    get_cooldown_remaining,
+    set_cooldown,
+    add_to_queue,
+    remove_from_queue,
+    get_queue_position,
+    estimate_wait_time,
+    format_wait_time,
+)
 from processors.face_blur import blur_faces_in_video
 from processors.voice_anon import anonymize_voice_fast, anonymize_voice_secure
 
@@ -64,11 +75,43 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message)
         return
     
+    # Check cooldown (30 seconds after last processed file)
+    if is_on_cooldown(user_id):
+        remaining = get_cooldown_remaining(user_id)
+        await update.message.reply_text(
+            f"⏳ **Please wait {remaining} seconds**\n\n"
+            f"You can send another file after the cooldown period.",
+            parse_mode='Markdown'
+        )
+        return
+    
     # Check if user already has an active task
     if user_id in active_tasks:
         await update.message.reply_text(
             "⚠️ You already have a file being processed.\n\n"
             "Use /stop to cancel it, or wait for it to finish."
+        )
+        return
+    
+    # Check if server is busy (2 concurrent jobs max)
+    if is_server_busy():
+        # Get file info first for queue
+        video = update.message.video or update.message.document
+        if not video:
+            await update.message.reply_text("❌ No video detected. Please send a valid video file.")
+            return
+        
+        file_size_mb = video.file_size / (1024 * 1024)
+        position = add_to_queue(user_id, chat_id, file_size_mb)
+        wait_time = format_wait_time(estimate_wait_time(position, file_size_mb))
+        
+        await update.message.reply_text(
+            f"⏳ **Server Busy - You're #{position} in queue**\n\n"
+            f"📊 Estimated wait: {wait_time}\n\n"
+            f"⚠️ **Please re-send your file when notified.**\n"
+            f"We'll message you when a slot opens.\n\n"
+            f"Use /stop to leave the queue.",
+            parse_mode='Markdown'
         )
         return
     
@@ -186,6 +229,9 @@ async def process_face_blur(update, context, video, file_size_mb, messages_to_de
                 parse_mode='Markdown'
             )
             messages_to_delete.append(warning_msg.message_id)
+            
+            # Set cooldown after successful processing
+            set_cooldown(user_id)
             
             asyncio.create_task(
                 delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
@@ -353,6 +399,9 @@ async def voice_level_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode='Markdown'
             )
             messages_to_delete.append(warning_msg.message_id)
+            
+            # Set cooldown after successful processing
+            set_cooldown(user_id)
             
             asyncio.create_task(
                 delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)

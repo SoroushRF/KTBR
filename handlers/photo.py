@@ -17,9 +17,19 @@ from config import (
     ESTIMATE_IMAGE_SEC_PER_MB,
     AUTO_DELETE_SECONDS,
     user_modes,
+    active_tasks,
     logger
 )
 from utils.auth import is_user_allowed
+from utils.queue_manager import (
+    is_server_busy,
+    is_on_cooldown,
+    get_cooldown_remaining,
+    set_cooldown,
+    add_to_queue,
+    estimate_wait_time,
+    format_wait_time,
+)
 from processors.face_blur import blur_faces_in_image
 
 
@@ -59,6 +69,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message)
         return
     
+    # Check cooldown (30 seconds after last processed file)
+    if is_on_cooldown(user_id):
+        remaining = get_cooldown_remaining(user_id)
+        await update.message.reply_text(
+            f"⏳ **Please wait {remaining} seconds**\n\n"
+            f"You can send another file after the cooldown period.",
+            parse_mode='Markdown'
+        )
+        return
+    
     # Check if user is in voice mode - reject images
     current_mode = get_user_mode(user_id)
     if current_mode == "voice":
@@ -66,6 +86,20 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ **Voice mode only works with videos!**\n\n"
             "📹 Send a **video** to anonymize voice.\n"
             "🎭 Or use /mode to switch to Face Blur for images.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Check if server is busy (2 concurrent jobs max)
+    if is_server_busy():
+        position = add_to_queue(user_id, chat_id, 1.0)  # Assume ~1MB for photos
+        wait_time = format_wait_time(estimate_wait_time(position, 1.0))
+        
+        await update.message.reply_text(
+            f"⏳ **Server Busy - You're #{position} in queue**\n\n"
+            f"📊 Estimated wait: {wait_time}\n\n"
+            f"⚠️ **Please re-send your photo when notified.**\n"
+            f"Use /stop to leave the queue.",
             parse_mode='Markdown'
         )
         return
@@ -135,6 +169,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode='Markdown'
                 )
                 messages_to_delete.append(warning_msg.message_id)
+                
+                # Set cooldown after successful processing
+                set_cooldown(user_id)
                 
                 asyncio.create_task(
                     delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
@@ -226,6 +263,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode='Markdown'
                     )
                     messages_to_delete.append(warning_msg.message_id)
+                    
+                    # Set cooldown after successful processing
+                    set_cooldown(user_id)
                     
                     asyncio.create_task(
                         delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
