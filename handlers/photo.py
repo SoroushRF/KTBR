@@ -35,129 +35,125 @@ from utils.queue_manager import (
 from processors.face_blur import blur_faces_in_image
 
 
-def get_user_mode(user_id: int) -> str:
-    """Get user's current mode, default is 'face'."""
+def get_user_mode(user_id: int) -> dict:
+    """Get user's current mode settings."""
     if user_id not in user_modes:
         user_modes[user_id] = {"mode": "face", "voice_level": "fast"}
-    return user_modes[user_id]["mode"]
+    return user_modes[user_id]
 
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
     """Delete messages after a delay."""
     try:
         await asyncio.sleep(delay)
-        
         for msg_id in message_ids:
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
             except Exception as e:
                 logger.warning(f"Could not delete message {msg_id}: {e}")
-            
     except Exception as e:
         logger.error(f"Error in delete_messages_after_delay: {e}")
 
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, queued_data: dict = None):
     """Handle photo uploads."""
-    user = update.effective_user
-    username = user.username
-    user_id = user.id
-    chat_id = update.effective_chat.id
+    if queued_data:
+        user_id = queued_data["user_id"]
+        chat_id = queued_data["chat_id"]
+        username = "QueuedUser"
+    else:
+        user = update.effective_user
+        username = user.username
+        user_id = user.id
+        chat_id = update.effective_chat.id
     
     messages_to_delete = []
+    user_mode_data = get_user_mode(user_id)
     
-    is_allowed, message = is_user_allowed(username, user_id)
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
-    
-    # Check cooldown (30 seconds after last processed file)
-    if is_on_cooldown(user_id):
-        remaining = get_cooldown_remaining(user_id)
-        await update.message.reply_text(
-            f"⏳ **Please wait {remaining} seconds**\n\n"
-            f"You can send another file after the cooldown period.",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # Check if user is in voice mode - reject images
-    current_mode = get_user_mode(user_id)
-    if current_mode == "voice":
-        await update.message.reply_text(
-            "❌ **Voice mode only works with videos!**\n\n"
-            "📹 Send a **video** to anonymize voice.\n"
-            "🎭 Or use /mode to switch to Face Blur for images.",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # Check if user already has an active task
-    if user_id in active_tasks:
-        await update.message.reply_text(
-            "⚠️ You already have a file being processed.\n\n"
-            "Use /stop to cancel it, or wait for it to finish."
-        )
-        return
-    
-    # Check if server is busy (2 concurrent jobs max)
-    if is_server_busy():
-        position = add_to_queue(user_id, chat_id, 1.0)  # Assume ~1MB for photos
-        wait_time = format_wait_time(estimate_wait_time(position, 1.0))
+    # Skip checks if this is an auto-triggered queued task
+    if not queued_data:
+        is_allowed, message = is_user_allowed(username, user_id)
+        if not is_allowed:
+            await update.message.reply_text(message)
+            return
         
-        await update.message.reply_text(
-            f"⏳ **Server Busy - You're #{position} in queue**\n\n"
-            f"📊 Estimated wait: {wait_time}\n\n"
-            f"⚠️ **Please re-send your photo when notified.**\n"
-            f"Use /stop to leave the queue.",
-            parse_mode='Markdown'
-        )
-        return
+        if is_on_cooldown(user_id):
+            remaining = get_cooldown_remaining(user_id)
+            await update.message.reply_text(
+                f"⏳ **Please wait {remaining} seconds**\n\nYou can send another file after the cooldown.",
+                parse_mode='Markdown'
+            )
+            return
+            
+        if user_mode_data["mode"] == "voice":
+            await update.message.reply_text("❌ **Voice mode only works with videos!**")
+            return
+            
+        if user_id in active_tasks:
+            await update.message.reply_text("⚠️ You already have a file being processed.")
+            return
+            
+        if is_server_busy():
+            photo_obj = update.message.photo[-1]
+            file_id = photo_obj.file_id
+            file_size_mb = photo_obj.file_size / (1024 * 1024)
+            metadata = {"mode": "face"}
+            position = add_to_queue(user_id, chat_id, file_size_mb, file_id, "photo", metadata)
+            wait_time = format_wait_time(estimate_wait_time(position, file_size_mb))
+            
+            queue_msg = await update.message.reply_text(
+                f"⏳ **Server Busy - You are #{position} in Queue**\n"
+                f"⏱️ Est. Wait: {wait_time}\n\n"
+                f"✅ **Auto-Upload Active**\n"
+                f"Your photo is saved. It will start automatically when it's your turn.\n"
+                f"**You do NOT need to re-upload.**\n\n"
+                f"❌ Use /stop to leave the queue.",
+                parse_mode='Markdown'
+            )
+            add_to_queue(user_id, chat_id, file_size_mb, file_id, "photo", metadata, queue_msg.message_id)
+            return
     
-    # Remove from queue if they were waiting
     remove_from_queue(user_id)
     
-    photo = update.message.photo[-1] if update.message.photo else None
-    
-    if not photo:
-        await update.message.reply_text("❌ No photo detected. Please send a valid image.")
+    if queued_data:
+        file_id = queued_data["file_id"]
+        file_size_mb = queued_data["file_size_mb"]
+        file_name = "queued_photo.jpg"
+        photo_obj = None
+    else:
+        photo_obj = update.message.photo[-1]
+        file_id = photo_obj.file_id
+        file_size_mb = photo_obj.file_size / (1024 * 1024)
+        file_name = "photo.jpg"
+
+    if not queued_data and (photo_obj.width > MAX_IMAGE_DIMENSION or photo_obj.height > MAX_IMAGE_DIMENSION):
+        await update.message.reply_text("❌ Image resolution too high!")
         return
-    
-    if photo.width > MAX_IMAGE_DIMENSION or photo.height > MAX_IMAGE_DIMENSION:
-        await update.message.reply_text(
-            f"❌ Image resolution too high!\n\n"
-            f"Your image: {photo.width}x{photo.height}\n"
-            f"Maximum: {MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION}"
-        )
-        return
-    
-    file_size_mb = photo.file_size / (1024 * 1024)
     
     if file_size_mb > MAX_IMAGE_SIZE_MB:
-        await update.message.reply_text(
-            f"❌ Image too large!\n\n"
-            f"Your file: {file_size_mb:.1f} MB\n"
-            f"Maximum: {MAX_IMAGE_SIZE_MB} MB"
-        )
+        msg = f"❌ Image too large ({file_size_mb:.1f} MB)!"
+        if queued_data:
+            await context.bot.send_message(chat_id=chat_id, text=msg)
+        else:
+            await update.message.reply_text(msg)
         return
     
     estimated_time = max(int(file_size_mb * ESTIMATE_IMAGE_SEC_PER_MB), 2)
+    res_str = f"{photo_obj.width}x{photo_obj.height}" if photo_obj else "Saved Resolution"
     
-    processing_msg = await update.message.reply_text(
-        f"⏳ **Processing your image...**\n\n"
-        f"📐 Resolution: {photo.width}x{photo.height}\n"
-        f"⏱️ Estimated time: ~{estimated_time} seconds\n\n"
-        f"Please wait...",
+    processing_msg = await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"⏳ **Processing your image...**\n\n📐 Resolution: {res_str}\n⏱️ Estimated time: ~{estimated_time}s",
         parse_mode='Markdown'
     )
     messages_to_delete.append(processing_msg.message_id)
     
     try:
+        active_tasks[user_id] = {"type": "photo"}
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = os.path.join(temp_dir, "input.jpg")
             output_path = os.path.join(temp_dir, "output.jpg")
-            
-            file = await context.bot.get_file(photo.file_id)
+            file = await context.bot.get_file(file_id)
             await file.download_to_drive(input_path)
             
             success = await asyncio.to_thread(blur_faces_in_image, input_path, output_path)
@@ -166,91 +162,99 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 with open(output_path, 'rb') as f:
                     image_data = f.read()
                 
-                result_msg = await update.message.reply_document(
+                result_msg = await context.bot.send_document(
+                    chat_id=chat_id,
                     document=BytesIO(image_data),
-                    filename="blurred_image.jpg",
-                    caption=f"✅ **Done!** Blurred image ready.\n\n"
-                            f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
+                    filename=f"blurred_{file_name}",
+                    caption=f"✅ **Done!**\n⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS}s..."
                 )
                 messages_to_delete.append(result_msg.message_id)
                 
-                warning_msg = await update.message.reply_text(
-                    f"�️ **Auto-delete in {AUTO_DELETE_SECONDS} seconds!**\n\n"
-                    f"📥 Save the image above NOW!\n"
-                    f"🔒 All bot messages will be deleted.\n\n"
-                    f"⚠️ Please also delete your original file manually.",
+                warning_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🗑️ **Auto-delete in {AUTO_DELETE_SECONDS}s!**",
                     parse_mode='Markdown'
                 )
                 messages_to_delete.append(warning_msg.message_id)
                 
-                # Set cooldown after successful processing
                 set_cooldown(user_id)
-                
-                asyncio.create_task(
-                    delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
-                )
+                asyncio.create_task(delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS))
             else:
-                error_msg = await update.message.reply_text(
-                    "❌ Failed to process image. Please try again.\n\n📤 Send another file to try again."
-                )
-                messages_to_delete.append(error_msg.message_id)
-    
+                await context.bot.send_message(chat_id=chat_id, text="❌ Failed to process image.")
+    except Exception as e:
+        logger.error(f"Error processing photo: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=f"❌ An error occurred: {e}")
     finally:
-        # Notify next user in queue if a slot opened up
-        asyncio.create_task(notify_next_in_queue(context))
+        if user_id in active_tasks:
+            del active_tasks[user_id]
+        from handlers.queue_worker import trigger_next_queued_job
+        asyncio.create_task(trigger_next_queued_job(context))
 
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle document uploads (for images/videos sent as files)."""
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE, queued_data: dict = None):
+    """Handle document uploads."""
     from handlers.video import handle_video
     
-    document = update.message.document
-    chat_id = update.effective_chat.id
-    
-    if not document or not document.mime_type:
-        await update.message.reply_text("❌ Unsupported file type.")
-        return
-    
-    mime_type = document.mime_type.lower()
-    
-    if mime_type.startswith('video/'):
-        await handle_video(update, context)
-    elif mime_type.startswith('image/'):
+    if queued_data:
+        user_id = queued_data["user_id"]
+        chat_id = queued_data["chat_id"]
+        file_type = queued_data["file_type"]
+    else:
         user = update.effective_user
-        is_allowed, message = is_user_allowed(user.username, user.id)
-        if not is_allowed:
-            await update.message.reply_text(message)
+        user_id = user.id
+        chat_id = update.effective_chat.id
+        document = update.message.document
+        if not document or not document.mime_type:
+            await update.message.reply_text("❌ Unsupported file type.")
             return
-        
-        messages_to_delete = []
-        file_size_mb = document.file_size / (1024 * 1024)
-        
-        if file_size_mb > MAX_IMAGE_SIZE_MB:
-            await update.message.reply_text(
-                f"❌ Image too large!\n\n"
-                f"Your file: {file_size_mb:.1f} MB\n"
-                f"Maximum: {MAX_IMAGE_SIZE_MB} MB"
+        mime_type = document.mime_type.lower()
+        file_type = "document_video" if mime_type.startswith('video/') else ("document_photo" if mime_type.startswith('image/') else "unknown")
+
+    if file_type == "document_video":
+        await handle_video(update, context, queued_data=queued_data)
+    elif file_type == "document_photo":
+        # Check busy for documents
+        if not queued_data and is_server_busy():
+            document = update.message.document
+            file_id = document.file_id
+            file_size_mb = document.file_size / (1024 * 1024)
+            metadata = {"mode": "face", "file_name": document.file_name}
+            position = add_to_queue(user_id, chat_id, file_size_mb, file_id, "document_photo", metadata)
+            wait_time = format_wait_time(estimate_wait_time(position, file_size_mb))
+            queue_msg = await update.message.reply_text(
+                f"⏳ **Server Busy - You are #{position} in Queue**\n"
+                f"⏱️ Est. Wait: {wait_time}\n"
+                f"✅ **Auto-Upload Active**\n"
+                f"Your file is saved. It will start automatically when it's your turn.\n"
+                f"**You do NOT need to re-upload.**\n\n"
+                f"❌ Use /stop to leave the queue.",
+                parse_mode='Markdown'
             )
+            add_to_queue(user_id, chat_id, file_size_mb, file_id, "document_photo", metadata, queue_msg.message_id)
             return
-        
-        estimated_time = max(int(file_size_mb * ESTIMATE_IMAGE_SEC_PER_MB), 2)
-        
-        processing_msg = await update.message.reply_text(
-            f"⏳ **Processing your image...**\n\n"
-            f"📊 File size: {file_size_mb:.1f} MB\n"
-            f"⏱️ Estimated time: ~{estimated_time} seconds\n\n"
-            f"Please wait...",
-            parse_mode='Markdown'
-        )
+
+        # Core document processing (similar to handle_photo)
+        messages_to_delete = []
+        if queued_data:
+            file_id = queued_data["file_id"]
+            file_size_mb = queued_data["file_size_mb"]
+            file_name = queued_data["metadata"].get("file_name", "image.jpg")
+        else:
+            document = update.message.document
+            file_id = document.file_id
+            file_size_mb = document.file_size / (1024 * 1024)
+            file_name = document.file_name or "image.jpg"
+
+        processing_msg = await context.bot.send_message(chat_id=chat_id, text="⏳ **Processing image from document...**")
         messages_to_delete.append(processing_msg.message_id)
-        
+
         try:
+            active_tasks[user_id] = {"type": "document"}
             with tempfile.TemporaryDirectory() as temp_dir:
-                ext = os.path.splitext(document.file_name)[1] if document.file_name else ".jpg"
+                ext = os.path.splitext(file_name)[1] or ".jpg"
                 input_path = os.path.join(temp_dir, f"input{ext}")
                 output_path = os.path.join(temp_dir, f"output{ext}")
-                
-                file = await context.bot.get_file(document.file_id)
+                file = await context.bot.get_file(file_id)
                 await file.download_to_drive(input_path)
                 
                 success = await asyncio.to_thread(blur_faces_in_image, input_path, output_path)
@@ -259,55 +263,29 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(output_path, 'rb') as f:
                         image_data = f.read()
                     
-                    result_msg = await update.message.reply_document(
+                    result_msg = await context.bot.send_document(
+                        chat_id=chat_id,
                         document=BytesIO(image_data),
-                        filename=f"blurred_{document.file_name or 'image.jpg'}",
-                        caption=f"✅ **Done!** Blurred image ready.\n\n"
-                                f"⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS} seconds..."
+                        filename=f"blurred_{file_name}",
+                        caption=f"✅ **Done!**\n⚠️ **SAVE NOW!** Auto-deleting in {AUTO_DELETE_SECONDS}s..."
                     )
                     messages_to_delete.append(result_msg.message_id)
-                    
-                    warning_msg = await update.message.reply_text(
-                        f"🗑️ **Auto-delete in {AUTO_DELETE_SECONDS} seconds!**\n\n"
-                        f"📥 Save the image above NOW!\n"
-                        f"🔒 All bot messages will be deleted.\n\n"
-                        f"⚠️ Please also delete your original file manually.",
-                        parse_mode='Markdown'
-                    )
-                    messages_to_delete.append(warning_msg.message_id)
-                    
-                    # Set cooldown after successful processing
                     set_cooldown(user_id)
-                    
-                    asyncio.create_task(
-                        delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS)
-                    )
+                    asyncio.create_task(delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS))
                 else:
-                    await update.message.reply_text("❌ Failed to process image. Please try again.")
+                    await context.bot.send_message(chat_id=chat_id, text="❌ Failed to process document.")
         except Exception as e:
-            logger.error(f"Error processing document: {e}")
-            await update.message.reply_text(f"❌ An error occurred: {str(e)}")
+            logger.error(f"Error: {e}")
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Error: {e}")
         finally:
-            # Notify next user in queue if a slot opened up
-            asyncio.create_task(notify_next_in_queue(context))
+            if user_id in active_tasks:
+                del active_tasks[user_id]
+            from handlers.queue_worker import trigger_next_queued_job
+            asyncio.create_task(trigger_next_queued_job(context))
     else:
-        await update.message.reply_text(
-            "❌ Unsupported file type.\n\n"
-            "Please send a video (.mp4, .avi, .mov) or image (.jpg, .png)."
-        )
+        await update.message.reply_text("❌ Unsupported file type.")
 
 
 async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown messages."""
-    user = update.effective_user
-    is_allowed, message = is_user_allowed(user.username, user.id)
-    
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
-    
-    await update.message.reply_text(
-        "📤 Please send me a **video** or **image** to blur faces.\n\n"
-        "Use /start to see the file limits.",
-        parse_mode='Markdown'
-    )
+    await update.message.reply_text("📤 Please send me a **video** or **image** to process.")

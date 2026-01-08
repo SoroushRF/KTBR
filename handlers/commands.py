@@ -112,7 +112,7 @@ Use /stop to cancel if needed.
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /stop command - cancels current processing."""
+    """Handle /stop command - cancels current processing or leaves the queue."""
     user = update.effective_user
     user_id = user.id
     
@@ -121,9 +121,25 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message)
         return
     
+    # Imports for queue management
+    from utils.queue_manager import is_in_queue, remove_from_queue, notify_next_in_queue
+    from config import active_tasks
+    
+    # 1. Check if they are in the queue
+    if is_in_queue(user_id):
+        remove_from_queue(user_id)
+        await update.message.reply_text(
+            "🛑 **Left the queue.**\n\nYour file will not be processed.",
+            parse_mode='Markdown'
+        )
+        # Notify whoever is next to update their positions
+        asyncio.create_task(notify_next_in_queue(context))
+        return
+
+    # 2. Check if they have an active task
     if user_id not in active_tasks:
         await update.message.reply_text(
-            "ℹ️ No active processing to stop.\n\n"
+            "ℹ️ No active processing or queue position to stop.\n\n"
             "Send a video or image to start processing."
         )
         return

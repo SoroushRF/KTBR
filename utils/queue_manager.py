@@ -4,6 +4,7 @@ Handles processing queue and user cooldowns.
 """
 
 import time
+import asyncio
 from config import (
     MAX_CONCURRENT_JOBS,
     processing_queue,
@@ -50,24 +51,35 @@ def is_in_queue(user_id: int) -> bool:
     return get_queue_position(user_id) > 0
 
 
-def add_to_queue(user_id: int, chat_id: int, file_size_mb: float = 0) -> int:
+def add_to_queue(user_id: int, chat_id: int, file_size_mb: float, file_id: str, file_type: str, metadata: dict, queue_msg_id: int = None) -> int:
     """
-    Add user to the processing queue.
+    Add user to the processing queue with file metadata.
     Returns their position (1-indexed).
     """
-    # Don't add if already in queue
-    if is_in_queue(user_id):
-        return get_queue_position(user_id)
+    # If already in queue, update their data
+    for item in processing_queue:
+        if item["user_id"] == user_id:
+            item["file_size_mb"] = file_size_mb
+            item["file_id"] = file_id
+            item["file_type"] = file_type
+            item["metadata"] = metadata
+            if queue_msg_id:
+                item["queue_msg_id"] = queue_msg_id
+            return get_queue_position(user_id)
     
     entry = {
         "user_id": user_id,
         "chat_id": chat_id,
         "timestamp": time.time(),
-        "file_size_mb": file_size_mb
+        "file_size_mb": file_size_mb,
+        "file_id": file_id,
+        "file_type": file_type,
+        "metadata": metadata, # user mode, etc
+        "queue_msg_id": queue_msg_id
     }
     processing_queue.append(entry)
     position = len(processing_queue)
-    logger.info(f"User {user_id} added to queue at position {position}")
+    logger.info(f"User {user_id} added to queue at position {position} with file {file_id}")
     return position
 
 
@@ -196,17 +208,53 @@ def get_server_status() -> dict:
     }
 
 
-async def notify_next_in_queue(context) -> bool:
+async def update_all_queue_messages(context) -> None:
     """
-    Check if a slot is open and notify the next user in the queue.
-    Called when a processing job finishes.
+    Iterate through the queue and update everyone's position and ETA message.
     """
+    for i, entry in enumerate(processing_queue):
+        user_id = entry["user_id"]
+        chat_id = entry["chat_id"]
+        msg_id = entry.get("queue_msg_id")
+        
+        if not msg_id:
+            continue
+            
+        position = i + 1
+        wait_time = format_wait_time(estimate_wait_time(position, entry["file_size_mb"]))
+        
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg_id,
+                text=f"⏳ **Queue Update - You're now #{position}**\n"
+                     f"⏱️ Est. Wait: {wait_time}\n\n"
+                     f"✅ **Auto-Upload Active**\n"
+                     f"Your file is saved. It will start automatically when it's your turn.\n"
+                     f"**You do NOT need to re-upload.**\n\n"
+                     f"❌ Use /stop to leave the queue.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            # If message can't be edited (e.g. deleted), it's fine
+            logger.debug(f"Could not update queue message for {user_id}: {e}")
+
+
+async def notify_next_in_queue(context) -> dict | None:
+    """
+    Check if a slot is open and notify the next user.
+    Also updates everyone else's queue position.
+    Returns the next_user object if notified, else None.
+    """
+    # First update everyone still in line
+    await update_all_queue_messages(context)
+    
     if is_server_busy():
-        return False
+        return None
         
     next_user = get_next_in_queue()
     if not next_user:
-        return False
+        return None
         
     chat_id = next_user["chat_id"]
     user_id = next_user["user_id"]
@@ -214,15 +262,14 @@ async def notify_next_in_queue(context) -> bool:
     try:
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ **A slot is now open!**\n\n"
-                 f"It's your turn. You can now send your video or photo for processing.\n\n"
-                 f"⚠️ *Note: Others in queue can also see this, so send your file soon!*",
+            text=f"✅ **It's your turn!**\n\n"
+                 f"Processing has started automatically.\n"
+                 f"**Please do NOT send the file again.**",
             parse_mode='Markdown'
         )
-        logger.info(f"Notified user {user_id} that slot is open")
-        return True
+        logger.info(f"Auto-notified user {user_id} of their turn")
+        return next_user
     except Exception as e:
         logger.error(f"Failed to notify user {user_id}: {e}")
-        # If notification fails, maybe they blocked the bot - remove them to avoid blocking queue
         remove_from_queue(user_id)
-        return False
+        return None
