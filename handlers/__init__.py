@@ -12,7 +12,7 @@ from handlers.commands import (
 from handlers.video import handle_video, voice_level_callback
 from handlers.photo import handle_photo, handle_document, handle_unknown
 from handlers.report import get_report_handler
-from handlers.access import get_access_handler, access_callback
+from handlers.request import get_request_handler, admin_callback_handler
 
 __all__ = [
     'start_command',
@@ -28,6 +28,6 @@ __all__ = [
     'handle_document',
     'handle_unknown',
     'get_report_handler',
-    'get_access_handler',
-    'access_callback',
+    'get_request_handler',
+    'admin_callback_handler',
 ]

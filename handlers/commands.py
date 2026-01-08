@@ -17,19 +17,15 @@ from config import (
     logger
 )
 from utils.auth import is_user_allowed
+from utils.decorators import require_auth
 
 
+@require_auth
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     user = update.effective_user
     username = user.username
     user_id = user.id
-    
-    is_allowed, message = is_user_allowed(username, user_id)
-    
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
     
     # Get current mode
     current_mode = get_user_mode(user_id)
@@ -70,14 +66,9 @@ Simply upload a file and I'll process it for you!
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
 
+@require_auth
 async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /upload command - explains how to upload."""
-    user = update.effective_user
-    is_allowed, message = is_user_allowed(user.username, user.id)
-    
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
     
     upload_message = f"""
 📤 **How to Upload Files**
@@ -111,15 +102,11 @@ Use /stop to cancel if needed.
     await update.message.reply_text(upload_message, parse_mode='Markdown')
 
 
+@require_auth
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stop command - cancels current processing or leaves the queue."""
     user = update.effective_user
     user_id = user.id
-    
-    is_allowed, message = is_user_allowed(user.username, user.id)
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
     
     # Imports for queue management
     from utils.queue_manager import is_in_queue, remove_from_queue, notify_next_in_queue
@@ -158,14 +145,10 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {user_id} requested cancellation")
 
 
+@require_auth
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /clear command - explains how to delete chat."""
     user = update.effective_user
-    is_allowed, message = is_user_allowed(user.username, user.id)
-    
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
     
     clear_message = """
 🗑️ **How to Clear Your Chat**
@@ -209,14 +192,10 @@ def get_user_mode(user_id: int) -> str:
     return user_modes[user_id]["mode"]
 
 
+@require_auth
 async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /mode command - switch between Face Blur and Voice Anonymize."""
     user = update.effective_user
-    is_allowed, message = is_user_allowed(user.username, user.id)
-    
-    if not is_allowed:
-        await update.message.reply_text(message)
-        return
     
     current_mode = get_user_mode(user.id)
     current_emoji = "🎭" if current_mode == "face" else "🔊"

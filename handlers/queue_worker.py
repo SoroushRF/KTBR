@@ -6,7 +6,7 @@ Handles automatic processing of queued files.
 import asyncio
 from telegram.ext import ContextTypes
 from utils.queue_manager import notify_next_in_queue, remove_from_queue
-from utils import logger
+from config import logger
 
 
 async def trigger_next_queued_job(context: ContextTypes.DEFAULT_TYPE):

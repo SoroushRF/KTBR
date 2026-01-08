@@ -5,7 +5,7 @@ Handles whitelist-based access control.
 
 import json
 import os
-from config import ALLOWED_USERNAMES, AUTHORIZED_IDS_FILE, logger
+from config import ALLOWED_USERNAMES, AUTHORIZED_IDS_FILE, OWNER_ID, logger
 
 
 def load_authorized_ids() -> list:
@@ -14,9 +14,11 @@ def load_authorized_ids() -> list:
         try:
             with open(AUTHORIZED_IDS_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception as e:
+            logger.error(f"Failed to load authorized IDs: {e}")
             return []
     return []
+
 
 
 def save_authorized_ids(ids: list):
@@ -25,18 +27,33 @@ def save_authorized_ids(ids: list):
         json.dump(ids, f, indent=2)
 
 
+def add_authorized_user(user_id: int):
+    """Explicitly authorize a user ID."""
+    ids = load_authorized_ids()
+    if user_id not in ids:
+        ids.append(user_id)
+        save_authorized_ids(ids)
+        logger.info(f"Manually authorized user ID: {user_id}")
+
+
+
 def is_user_allowed(username: str, user_id: int) -> tuple[bool, str]:
     """
     Check if user is allowed to use the bot.
     
     Flow:
-    1. If user_id is already authorized → allow
-    2. If username is in whitelist → authorize this ID and allow
-    3. Otherwise → reject
+    1. If user is OWNER -> allow
+    2. If user_id is already authorized -> allow
+    3. If username is in whitelist -> authorize this ID and allow
+    4. Otherwise -> reject
     
     Returns:
         (is_allowed, message)
     """
+    # Check Owner
+    if user_id == OWNER_ID:
+        return True, "✅ Access granted (Owner)"
+
     authorized_ids = load_authorized_ids()
     
     # Check if ID is already authorized (instant access)

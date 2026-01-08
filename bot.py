@@ -26,8 +26,8 @@ from handlers import (
     handle_document,
     handle_unknown,
     get_report_handler,
-    get_access_handler,
-    access_callback,
+    get_request_handler,
+    admin_callback_handler,
 )
 
 
@@ -68,12 +68,13 @@ def main():
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .concurrent_updates(True)  # CRITICAL: Allows handlers to run in parallel
+        #.concurrent_updates(True)  # Disabled for stability
         .post_init(post_init)
         .build()
     )
     
     # Add command handlers
+    
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("mode", mode_command))
     application.add_handler(CommandHandler("upload", upload_command))
@@ -87,14 +88,17 @@ def main():
     application.add_handler(CallbackQueryHandler(voice_level_callback, pattern="^voice_"))
 
     
-    # Add callback handler for admin access approvals
-    application.add_handler(CallbackQueryHandler(access_callback, pattern="^access_"))
+
     
     # Add conversation handlers (MUST be before standard message handlers)
-    # ACCESS HANDLER FIRST: Intercepts all unauthorized messages
-    application.add_handler(get_access_handler())
+    
+    # Admin actions
+    application.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin_"))
+
     # Report handler
     application.add_handler(get_report_handler())
+    # Request access handler
+    application.add_handler(get_request_handler())
     
     # Add message handlers
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))

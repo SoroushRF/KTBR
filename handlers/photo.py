@@ -33,6 +33,7 @@ from utils.queue_manager import (
     notify_next_in_queue,
 )
 from processors.face_blur import blur_faces_in_image
+from utils.decorators import require_auth
 
 
 def get_user_mode(user_id: int) -> dict:
@@ -55,6 +56,7 @@ async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_i
         logger.error(f"Error in delete_messages_after_delay: {e}")
 
 
+@require_auth
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, queued_data: dict = None):
     """Handle photo uploads."""
     if queued_data:
@@ -72,10 +74,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, queue
     
     # Skip checks if this is an auto-triggered queued task
     if not queued_data:
-        is_allowed, message = is_user_allowed(username, user_id)
-        if not is_allowed:
-            await update.message.reply_text(message)
-            return
+        # Auth check handled by decorator
         
         if is_on_cooldown(user_id):
             remaining = get_cooldown_remaining(user_id)
@@ -191,6 +190,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE, queue
         asyncio.create_task(trigger_next_queued_job(context))
 
 
+@require_auth
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE, queued_data: dict = None):
     """Handle document uploads."""
     from handlers.video import handle_video
@@ -286,6 +286,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE, qu
         await update.message.reply_text("❌ Unsupported file type.")
 
 
+@require_auth
 async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle unknown messages."""
     await update.message.reply_text("📤 Please send me a **video** or **image** to process.")

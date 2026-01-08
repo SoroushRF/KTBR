@@ -36,6 +36,7 @@ from utils.queue_manager import (
     notify_next_in_queue,
 )
 from processors.face_blur import blur_faces_in_video
+from utils.decorators import require_auth
 from processors.voice_anon import anonymize_voice_fast, anonymize_voice_secure
 
 
@@ -59,6 +60,7 @@ async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_i
         logger.error(f"Error in delete_messages_after_delay: {e}")
 
 
+@require_auth
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE, queued_data: dict = None):
     """Handle video uploads."""
     if queued_data:
@@ -78,10 +80,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE, queue
     
     # Skip checks if this is an auto-triggered queued task
     if not queued_data:
-        is_allowed, message = is_user_allowed(username, user_id)
-        if not is_allowed:
-            await update.message.reply_text(message)
-            return
+        # Auth check handled by decorator
         
         if is_on_cooldown(user_id):
             remaining = get_cooldown_remaining(user_id)
@@ -177,12 +176,18 @@ async def start_face_blur(context, chat_id, user_id, file_id, file_name, file_si
         
         if success and not cancelled and os.path.exists(output_path):
             with open(output_path, 'rb') as f: video_data = f.read()
-            await context.bot.send_document(
+            
+            # Change extension to .mp4
+            base_name = os.path.splitext(file_name)[0]
+            new_filename = f"blurred_{base_name}.mp4"
+            
+            result_msg = await context.bot.send_document(
                 chat_id=chat_id,
                 document=BytesIO(video_data),
-                filename=f"blurred_{file_name}",
+                filename=new_filename,
                 caption=f"✅ Done!\n⚠️ Saving now! Deleting in {AUTO_DELETE_SECONDS}s"
             )
+            messages_to_delete.append(result_msg.message_id)
             set_cooldown(user_id)
             asyncio.create_task(delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS))
         else:
@@ -246,7 +251,18 @@ async def start_voice_processing(context, chat_id, user_id, file_id, file_name, 
         
         if success and not cancelled:
             with open(output_path, 'rb') as f: data = f.read()
-            await context.bot.send_document(chat_id=chat_id, document=BytesIO(data), filename=f"anon_{file_name}", caption=f"✅ Voice Anonymized ({mode_name})")
+            
+            # Change extension to .mp4
+            base_name = os.path.splitext(file_name)[0]
+            new_filename = f"anon_{base_name}.mp4"
+            
+            result_msg = await context.bot.send_document(
+                chat_id=chat_id, 
+                document=BytesIO(data), 
+                filename=new_filename, 
+                caption=f"✅ Voice Anonymized ({mode_name})"
+            )
+            messages_to_delete.append(result_msg.message_id)
             set_cooldown(user_id)
             asyncio.create_task(delete_messages_after_delay(context, chat_id, messages_to_delete, AUTO_DELETE_SECONDS))
         else:
