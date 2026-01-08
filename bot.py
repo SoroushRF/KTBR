@@ -68,7 +68,7 @@ def main():
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        #.concurrent_updates(True)  # Disabled for stability
+        .concurrent_updates(True)  # CRITICAL: Allows handlers to run in parallel
         .post_init(post_init)
         .build()
     )
