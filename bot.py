@@ -21,6 +21,7 @@ from handlers import (
     mode_command,
     mode_callback,
     handle_video,
+    voice_level_callback,
     handle_photo,
     handle_document,
     handle_unknown,
@@ -77,6 +78,9 @@ def main():
     
     # Add callback handler for inline buttons (mode selection)
     application.add_handler(CallbackQueryHandler(mode_callback, pattern="^mode_"))
+    
+    # Add callback handler for voice level selection
+    application.add_handler(CallbackQueryHandler(voice_level_callback, pattern="^voice_"))
     
     # Add message handlers
     application.add_handler(MessageHandler(filters.VIDEO, handle_video))

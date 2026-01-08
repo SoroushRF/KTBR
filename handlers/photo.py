@@ -16,10 +16,18 @@ from config import (
     MAX_IMAGE_DIMENSION,
     ESTIMATE_IMAGE_SEC_PER_MB,
     AUTO_DELETE_SECONDS,
+    user_modes,
     logger
 )
 from utils.auth import is_user_allowed
 from processors.face_blur import blur_faces_in_image
+
+
+def get_user_mode(user_id: int) -> str:
+    """Get user's current mode, default is 'face'."""
+    if user_id not in user_modes:
+        user_modes[user_id] = {"mode": "face", "voice_level": "fast"}
+    return user_modes[user_id]["mode"]
 
 
 async def delete_messages_after_delay(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_ids: list, delay: int):
@@ -64,6 +72,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_allowed, message = is_user_allowed(username, user_id)
     if not is_allowed:
         await update.message.reply_text(message)
+        return
+    
+    # Check if user is in voice mode - reject images
+    current_mode = get_user_mode(user_id)
+    if current_mode == "voice":
+        await update.message.reply_text(
+            "❌ **Voice mode only works with videos!**\n\n"
+            "📹 Send a **video** to anonymize voice.\n"
+            "🎭 Or use /mode to switch to Face Blur for images.",
+            parse_mode='Markdown'
+        )
         return
     
     photo = update.message.photo[-1] if update.message.photo else None

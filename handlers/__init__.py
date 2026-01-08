@@ -9,7 +9,7 @@ from handlers.commands import (
     mode_callback,
     get_user_mode,
 )
-from handlers.video import handle_video
+from handlers.video import handle_video, voice_level_callback
 from handlers.photo import handle_photo, handle_document, handle_unknown
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     'mode_callback',
     'get_user_mode',
     'handle_video',
+    'voice_level_callback',
     'handle_photo',
     'handle_document',
     'handle_unknown',
